@@ -4,12 +4,14 @@ import database
 import time
 from log import Logger
 from weditor import uidumplib
-
+import re
+import random
 
 class Operate(object):
 
     def __init__(self, device):
         self.__d = u2.connect_usb(device)
+        self.__display = self.__d.device_info['display']
         global logger
         logger = Logger(device)
 
@@ -62,11 +64,15 @@ class Operate(object):
     def answer(self):
         try:
             logger.debug('获取题目')
-            id, quiz, choices = self.getsubject()
+            id, quiz, choices, coordinate_choices = self.getsubject()
             result = self.get_answer(quiz, choices)
             logger.info('我的答案：%s' % choices[result['answer']])
             mychoice = result['answer']
+            #这个方法也容易被封号，需加个随机延时
+            time.sleep(random.uniform(0.5, 2.0))
             self.__d(description=['A.  ', 'B.  ', 'C.  '][mychoice] + choices[mychoice]).click()
+            #此方法速度太快，容易被禁赛
+            #self.__d.click(coordinate_choices[mychoice][0], coordinate_choices[mychoice][1])
             logger.debug('选择选项')
             iscorrect, result['answer'] = self.checkup(mychoice, choices)
             self.update(iscorrect, result, quiz, choices)
@@ -106,18 +112,45 @@ class Operate(object):
     def getsubject(self):
         while not self.__d(description='/5').exists:
             pass
-        tmp = self.__d(className='android.view.View')
-        c = tmp.count
-        id = tmp[c - 2].info['contentDescription']
+        dom = uidumplib.get_android_hierarchy_dom(self.__d).documentElement
+        node_flag = select(dom, 'content-desc', '/5')
+        node_id = node_flag.previousSibling.previousSibling
+        node_parent = node_flag.parentNode.previousSibling.previousSibling
+        node_quiz = node_parent.childNodes[3]
+        node_A = node_parent.childNodes[5].childNodes[1]
+        node_B = node_parent.childNodes[7].childNodes[1]
+        node_C = node_parent.childNodes[9].childNodes[1]
+        id = node_id.attributes.getNamedItem('content-desc').value
         logger.info('第 %s 题' % id)
-        quiz = tmp[c - 6].info['contentDescription']
+        quiz = node_quiz.attributes.getNamedItem('content-desc').value
         logger.info(quiz)
         choices = []
-        choices.append(tmp[c - 5].info['contentDescription'][4::])
-        choices.append(tmp[c - 4].info['contentDescription'][4::])
-        choices.append(tmp[c - 3].info['contentDescription'][4::])
+        choices.append(node_A.attributes.getNamedItem('content-desc').value[4::])
+        choices.append(node_B.attributes.getNamedItem('content-desc').value[4::])
+        choices.append(node_C.attributes.getNamedItem('content-desc').value[4::])
         logger.info('A.%s B.%s C.%s' % (choices[0], choices[1], choices[2]))
-        return id, quiz, choices
+        pattern = re.compile(r'\d+')
+        A_bounds = pattern.findall(node_A.attributes.getNamedItem('bounds').value)
+        A_bounds = [int(i) for i in A_bounds]
+        B_bounds = pattern.findall(node_B.attributes.getNamedItem('bounds').value)
+        B_bounds = [int(i) for i in B_bounds]
+        C_bounds = pattern.findall(node_C.attributes.getNamedItem('bounds').value)
+        C_bounds = [int(i) for i in C_bounds]
+        coordinate_A = [int((A_bounds[0]+A_bounds[2])/2)/self.__display['width'], int((A_bounds[1]+A_bounds[3])/2)/self.__display['height']]
+        coordinate_B = [int((B_bounds[0]+B_bounds[2])/2)/self.__display['width'], int((B_bounds[1]+B_bounds[3])/2)/self.__display['height']]
+        coordinate_C = [int((C_bounds[0]+C_bounds[2])/2)/self.__display['width'], int((C_bounds[1]+C_bounds[3])/2)/self.__display['height']]
+        # tmp = self.__d(className='android.view.View')
+        # c = tmp.count
+        # id = tmp[c - 2].info['contentDescription']
+        # logger.info('第 %s 题' % id)
+        # quiz = tmp[c - 6].info['contentDescription']
+        # logger.info(quiz)
+        # choices = []
+        # choices.append(tmp[c - 5].info['contentDescription'][4::])
+        # choices.append(tmp[c - 4].info['contentDescription'][4::])
+        # choices.append(tmp[c - 3].info['contentDescription'][4::])
+        # logger.info('A.%s B.%s C.%s' % (choices[0], choices[1], choices[2]))
+        return id, quiz, choices, [coordinate_A, coordinate_B, coordinate_C]
 
     def checkup(self, mychoice, choices):
         time.sleep(1.5)
@@ -168,8 +201,20 @@ class Operate(object):
         db.close()
 
 
+def select(node, key, value):
+    if node is not None:
+        attr = node.attributes
+        if attr is not None and attr.getNamedItem(key) is not None and attr.getNamedItem(key).value == value:
+            return node
+        for n in node.childNodes:
+            nl = select(n, key, value)
+            if nl is not None:
+                return nl
+    else:
+        return None
+
 if __name__ == '__main__':
     d = u2.connect_usb('VBJDU18422021801')
-    s = time.clock()
-    a = uidumplib.get_android_hierarchy(d)
-    print(time.clock() - s)
+    start = time.clock()
+
+    print(time.clock() - start)
