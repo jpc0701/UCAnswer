@@ -10,7 +10,9 @@
 使用的框架是uimatomator，github：https://github.com/openatx/uiautomator2
 
 version 1.0
+
 直接使用uiautomator2的基本功能，定位元素，获取题目内容
 
 version 2.0
+
 除了使用uiautomator2的基本功能外，在获取题目内容方面改写了一点内容，使获取题目内容速度大大增加，但是这样答题速度太快了，容易被发现禁赛，所以要加个随机延时的函数。
