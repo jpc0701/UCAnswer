@@ -49,7 +49,7 @@ class Operate(object):
             logger.info('进入排位赛')
             logger.info('正在匹配中......')
             while not self.__d(description='本场消耗:').exists:
-                if self.__d(description='游戏已结束').exists:
+                if self.__d(description='游戏已结束').exists or self.__d(description='/5').exists:
                     self.__d(description='我知道了').click()
                     logger.warning('匹配失败')
                     return False
