@@ -10,7 +10,7 @@ import random
 class Operate(object):
 
     def __init__(self, device):
-        self.__d = u2.connect_usb(device)
+        self.__d = u2.connect(device)
         self.__display = self.__d.device_info['display']
         global logger
         logger = Logger(device)
@@ -24,16 +24,12 @@ class Operate(object):
                 logger.debug('打开UC浏览器')
                 if self.__d(text='我 的').click_exists(10):
                     logger.debug('进入用户页面')
-                    if self.__d(text='赚金币').click_exists(10):
+                    if self.__d(text='玩游戏').click_exists(10):
                         logger.debug('进入游戏页面1')
-                        if self.__d(description='小游戏赢钱').click_exists(10):
-                            logger.debug('进入游戏页面2')
-                            if self.__d(description='答题赢钱').click_exists(10):
-                                logger.info('选择游戏')
-                            else:
-                                logger.warning('选择游戏失败')
+                        if self.__d(description='答题赢钱').click_exists(10):
+                            logger.info('选择游戏')
                         else:
-                            logger.warning('进入游戏页面2失败')
+                            logger.warning('选择游戏失败')
                     else:
                         logger.warning('进入游戏页面1失败')
                 else:
@@ -49,10 +45,13 @@ class Operate(object):
             logger.info('进入排位赛')
             logger.info('正在匹配中......')
             while not self.__d(description='本场消耗:').exists:
-                if self.__d(description='游戏已结束').exists or self.__d(description='/5').exists:
+                if self.__d(description='游戏已结束').exists:
                     self.__d(description='我知道了').click()
                     logger.warning('匹配失败')
                     return False
+                elif self.__d(description='/5').exists:
+                    logger.warning('游戏已经开始')
+                    return True
             if self.__d(description='本场消耗:').wait(False, 10):
                 logger.info('匹配成功')
                 return True
@@ -64,18 +63,21 @@ class Operate(object):
     def answer(self):
         try:
             logger.debug('获取题目')
-            id, quiz, choices, coordinate_choices = self.getsubject()
+            id, quiz, choices, coordinate_choices, start_time = self.getsubject()
             result = self.get_answer(quiz, choices)
             logger.info('我的答案：%s' % choices[result['answer']])
             mychoice = result['answer']
+            all_time = time.clock() - start_time
+            #logger.info("耗时：%f s" % all_time)
             #这个方法也容易被封号，需加个随机延时
-            time.sleep(random.uniform(0.5, 2.0))
+            time.sleep(0 if all_time > 1.5 else 1.5 - all_time)
             self.__d(description=['A.  ', 'B.  ', 'C.  '][mychoice] + choices[mychoice]).click()
             #此方法速度太快，容易被禁赛
             #self.__d.click(coordinate_choices[mychoice][0], coordinate_choices[mychoice][1])
             logger.debug('选择选项')
             iscorrect, result['answer'] = self.checkup(mychoice, choices)
-            self.update(iscorrect, result, quiz, choices)
+            if result['answer'] >= 0:
+                self.update(iscorrect, result, quiz, choices)
             while self.__d(description='/5').exists:
                 pass
             logger.info('本题结束')
@@ -112,6 +114,7 @@ class Operate(object):
     def getsubject(self):
         while not self.__d(description='/5').exists:
             pass
+        start_time = time.clock()
         dom = uidumplib.get_android_hierarchy_dom(self.__d).documentElement
         node_flag = select(dom, 'content-desc', '/5')
         node_id = node_flag.previousSibling.previousSibling
@@ -150,28 +153,49 @@ class Operate(object):
         # choices.append(tmp[c - 4].info['contentDescription'][4::])
         # choices.append(tmp[c - 3].info['contentDescription'][4::])
         # logger.info('A.%s B.%s C.%s' % (choices[0], choices[1], choices[2]))
-        return id, quiz, choices, [coordinate_A, coordinate_B, coordinate_C]
+        return id, quiz, choices, [coordinate_A, coordinate_B, coordinate_C], start_time
 
     def checkup(self, mychoice, choices):
-        time.sleep(1.5)
-        iscorrect = True
-        tmp = self.__d(description=['A.  ', 'B.  ', 'C.  '][mychoice] + choices[mychoice]).sibling()
-        while tmp.count != 2:
-            pass
-        if tmp[1].info['className'] != 'android.view.View':
-            iscorrect = False
-            logger.info('答案错误')
-            for i in range(0, len(choices)):
-                if i != mychoice and self.__d(description=['A.  ', 'B.  ', 'C.  '][i] + choices[i]).sibling().count == 2:
-                    mychoice = i
-                    logger.info('正确答案；%s' % choices[i])
-                    break
-        else:
-            logger.info('答案正确')
-        return iscorrect, mychoice
+        #这部分可以在改进一下
+        while True:
+            dom = uidumplib.get_android_hierarchy_dom(self.__d).documentElement
+            choiceslist = []
+            for i in choices:
+                node_tmp = select(dom, 'content-desc', ['A.  ', 'B.  ', 'C.  '][mychoice] + choices[mychoice])
+                if node_tmp is None:
+                    logger.warning('未及时获取结果')
+                    return False, -1
+                choiceslist.append(node_tmp)
+            if choiceslist[mychoice].nextSibling.nextSibling is None:
+                continue
+            elif choiceslist[mychoice].nextSibling.nextSibling.attributes.getNamedItem('class').value == 'android.view.View':
+                logger.info('答案正确')
+                return True, mychoice
+            elif choiceslist[mychoice].nextSibling.nextSibling.attributes.getNamedItem('class').value == 'android.widget.ImageView':
+                for i in range(0, len(choices)):
+                    if i != mychoice and self.__d(description=['A.  ', 'B.  ', 'C.  '][i] + choices[i]).sibling().count == 2:
+                        logger.warning('答案错误')
+                        logger.info('正确答案；%s' % choices[i])
+                        return False, i
+        # time.sleep(1.5)
+        # iscorrect = True
+        # tmp = self.__d(description=['A.  ', 'B.  ', 'C.  '][mychoice] + choices[mychoice]).sibling()
+        # while tmp.count != 2:
+        #     pass
+        # if tmp[1].info['className'] != 'android.view.View':
+        #     iscorrect = False
+        #     logger.info('答案错误')
+        #     for i in range(0, len(choices)):
+        #         if i != mychoice and self.__d(description=['A.  ', 'B.  ', 'C.  '][i] + choices[i]).sibling().count == 2:
+        #             mychoice = i
+        #             logger.info('正确答案；%s' % choices[i])
+        #             break
+        # else:
+        #     logger.info('答案正确')
+        # return iscorrect, mychoice
 
     def get_answer(self, quiz, choices):
-        answer = {'status': 0, 'answer': 0}
+        answer = {'status': 0, 'answer': 1}
         db = database.UCanswer()
         result = db.search(quiz)
         db.close()
@@ -216,5 +240,5 @@ def select(node, key, value):
 if __name__ == '__main__':
     d = u2.connect_usb('VBJDU18422021801')
     start = time.clock()
-
+    dom = uidumplib.get_android_hierarchy_dom(d).documentElement
     print(time.clock() - start)
